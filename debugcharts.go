@@ -319,7 +319,7 @@ func (p *DebugChartServer) dataFeedHandler(w http.ResponseWriter, r *http.Reques
 	var i uint
 
 	for u := range c.c {
-		websocket.WriteJSON(conn, u)
+		conn.WriteJSON(u)
 		i++
 
 		if i%10 == 0 {
