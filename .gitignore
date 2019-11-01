@@ -22,7 +22,4 @@ _testmain.go
 *.exe
 *.test
 *.prof
-/.idea/debugcharts.iml
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/vcs.xml
+/.idea
