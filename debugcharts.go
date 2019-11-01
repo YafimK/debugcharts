@@ -124,7 +124,7 @@ var (
 func (p *DebugChartServer) serve() error {
 	go func() {
 		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			p.log.Printf("profiler server failed starting: %v", err)
+			p.log.Infof("profiler server failed starting: %v", err)
 			p.errorChan <- err
 		}
 	}()
@@ -375,10 +375,50 @@ func handleAsset(path string) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
+type SimpleLogger struct {
+	log log.Logger
+}
+
+func (s SimpleLogger) Infof(format string, v ...interface{}) {
+	s.log.Printf(format, v)
+}
+
+func (s SimpleLogger) info(v ...interface{}) {
+	s.log.Print(v)
+}
+
+func (s SimpleLogger) Infoln(v ...interface{}) {
+	s.log.Println(v)
+}
+
+func (s SimpleLogger) Fatal(v ...interface{}) {
+	s.log.Fatal(v)
+}
+
+func (s SimpleLogger) Fatalf(format string, v ...interface{}) {
+	s.log.Fatalf(format, v)
+}
+
+func (s SimpleLogger) Fatalln(v ...interface{}) {
+	s.log.Fatalln(v)
+}
+
+func (s SimpleLogger) Panic(v ...interface{}) {
+	s.log.Panic(v)
+}
+
+func (s SimpleLogger) Panicf(format string, v ...interface{}) {
+	s.log.Panicf(format, v)
+}
+
+func (s SimpleLogger) Panicln(v ...interface{}) {
+	s.log.Panicln(v)
+}
+
 type Logger interface {
-	Printf(format string, v ...interface{})
-	Print(v ...interface{})
-	Println(v ...interface{})
+	Infof(format string, v ...interface{})
+	info(v ...interface{})
+	Infoln(v ...interface{})
 	Fatal(v ...interface{})
 	Fatalf(format string, v ...interface{})
 	Fatalln(v ...interface{})

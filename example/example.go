@@ -45,7 +45,7 @@ func main() {
 		Addr:    "localhost:8080",
 		Handler: mux,
 	}
-	debugcharts.NewDebugChartService(mux, debugcharts.DefaultDebugChartsPattern, &log.Logger{})
+	debugcharts.NewDebugChartService(mux, debugcharts.DefaultDebugChartsPattern, &debugcharts.SimpleLogger{})
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("profiler server failed starting: %v", err)
