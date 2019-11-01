@@ -379,16 +379,12 @@ type SimpleLogger struct {
 	log log.Logger
 }
 
-func (s SimpleLogger) Infof(format string, v ...interface{}) {
-	s.log.Printf(format, v)
-}
-
-func (s SimpleLogger) info(v ...interface{}) {
+func (s SimpleLogger) Info(v ...interface{}) {
 	s.log.Print(v)
 }
 
-func (s SimpleLogger) Infoln(v ...interface{}) {
-	s.log.Println(v)
+func (s SimpleLogger) Infof(format string, v ...interface{}) {
+	s.log.Printf(format, v)
 }
 
 func (s SimpleLogger) Critical(v ...interface{}) {
@@ -399,25 +395,9 @@ func (s SimpleLogger) Criticalf(format string, v ...interface{}) {
 	s.log.Fatalf(format, v)
 }
 
-func (s SimpleLogger) Panic(v ...interface{}) {
-	s.log.Panic(v)
-}
-
-func (s SimpleLogger) Panicf(format string, v ...interface{}) {
-	s.log.Panicf(format, v)
-}
-
-func (s SimpleLogger) Panicln(v ...interface{}) {
-	s.log.Panicln(v)
-}
-
 type Logger interface {
-	Infof(format string, v ...interface{})
-	info(v ...interface{})
-	Infoln(v ...interface{})
-	Critical(v ...interface{})
-	Criticalf(format string, v ...interface{})
-	Panic(v ...interface{})
-	Panicf(format string, v ...interface{})
-	Panicln(v ...interface{})
+	Info(...interface{})
+	Infof(string, ...interface{})
+	Critical(...interface{})
+	Criticalf(string, ...interface{})
 }
