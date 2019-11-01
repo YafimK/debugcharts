@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/yafimk/debugcharts"
 	"log"
 	"net/http"
 	"runtime"
@@ -9,7 +10,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/gorilla/handlers"
 	_ "github.com/mkevac/debugcharts"
 )
 
@@ -40,8 +40,16 @@ func dummyAllocations() {
 func main() {
 	go dummyAllocations()
 	go dummyCPUUsage()
+	mux := http.NewServeMux()
+	server := http.Server{
+		Addr:    "localhost:8080",
+		Handler: mux,
+	}
+	debugcharts.NewDebugChartService(mux, debugcharts.DefaultDebugChartsPattern, &log.Logger{})
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", handlers.CompressHandler(http.DefaultServeMux)))
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("profiler server failed starting: %v", err)
+		}
 	}()
 	log.Printf("you can now open http://localhost:8080/debug/charts/ in your browser")
 	select {}

@@ -36,7 +36,7 @@ import (
 
 const (
 	maxCount                  int = 86400
-	defaultDebugChartsPattern     = "/debug/charts/"
+	DefaultDebugChartsPattern     = "/debug/charts/"
 )
 
 type update struct {
@@ -103,6 +103,17 @@ type DebugChartServer struct {
 	myProcess      *process.Process
 }
 
+func NewDebugChartServer(pattern string, log Logger) *DebugChartServer {
+	dcs := NewDebugChartService(http.DefaultServeMux, pattern, log)
+	dcs.server = http.Server{Addr: "localhost:8080"}
+	return dcs
+}
+
+//NewDebugChartService binds to existent mux with the given pattern
+func NewDebugChartService(mux *http.ServeMux, pattern string, log Logger) *DebugChartServer {
+	return (&DebugChartServer{mux: mux, pattern: pattern, log: log}).bind()
+}
+
 var (
 	upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -110,25 +121,10 @@ var (
 	}
 )
 
-func Bind(mux *http.ServeMux, log Logger) {
-	dcs := DebugChartServer{
-		mux:            mux,
-		pattern:        defaultDebugChartsPattern,
-		consumersMutex: sync.RWMutex{},
-		log:            log,
-		errorChan:      make(chan error),
-		data:           DataStorage{},
-		mutex:          sync.RWMutex{},
-		upgrader:       websocket.Upgrader{},
-		myProcess:      nil,
-	}
-	dcs.bind()
-}
-
 func (p *DebugChartServer) serve() error {
 	go func() {
 		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			p.log.Errorf("profiler server failed starting: %v", err)
+			p.log.Printf("profiler server failed starting: %v", err)
 			p.errorChan <- err
 		}
 	}()
@@ -208,15 +204,23 @@ func (p *DebugChartServer) gatherData() {
 	}
 }
 
-func (p *DebugChartServer) bind() {
-	p.mux.HandleFunc("/debug/charts/data-feed", p.dataFeedHandler)
-	p.mux.HandleFunc("/debug/charts/data", p.dataHandler)
+func (p *DebugChartServer) getUri(suffix string) string {
+	uri := p.pattern
+	if uri[len(uri)-1] != '/' {
+		uri += "/"
+	}
+	uri += suffix
+	return uri
+}
+func (p *DebugChartServer) bind() *DebugChartServer {
+	p.mux.HandleFunc(p.getUri("data-feed"), p.dataFeedHandler)
+	p.mux.HandleFunc(p.getUri("data"), p.dataHandler)
 
-	p.mux.HandleFunc("/debug/charts/", handleAsset("static/index.html"))
+	p.mux.HandleFunc(p.getUri(""), handleAsset("static/index.html"))
 
-	p.mux.HandleFunc("/debug/charts/main.js", handleAsset("static/main.js"))
-	p.mux.HandleFunc("/debug/charts/jquery-2.1.4.min.js", handleAsset("static/jquery-2.1.4.min.js"))
-	p.mux.HandleFunc("/debug/charts/moment.min.js", handleAsset("static/moment.min.js"))
+	p.mux.HandleFunc(p.getUri("main.js"), handleAsset("static/main.js"))
+	p.mux.HandleFunc(p.getUri("jquery-2.1.4.min.js"), handleAsset("static/jquery-2.1.4.min.js"))
+	p.mux.HandleFunc(p.getUri("moment.min.js"), handleAsset("static/moment.min.js"))
 
 	p.myProcess, _ = process.NewProcess(int32(os.Getpid()))
 
@@ -228,6 +232,7 @@ func (p *DebugChartServer) bind() {
 	p.data.Pprof = make([]PprofPair, 0, maxCount)
 
 	go p.gatherData()
+	return p
 }
 
 func (p *DebugChartServer) sendToConsumers(u update) {
@@ -377,9 +382,6 @@ type Logger interface {
 	Fatal(v ...interface{})
 	Fatalf(format string, v ...interface{})
 	Fatalln(v ...interface{})
-	Error(v ...interface{})
-	Errorf(format string, v ...interface{})
-	Errorln(v ...interface{})
 	Panic(v ...interface{})
 	Panicf(format string, v ...interface{})
 	Panicln(v ...interface{})
