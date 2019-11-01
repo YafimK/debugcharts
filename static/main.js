@@ -77,7 +77,7 @@ $(function () {
 		});
 
 		var pprofList = ["Block", "Goroutine", "Heap", "Mutex", "Threadcreate"];
-		var pDataChart4 = []
+		var pDataChart4 = [];
 		for (i = 0; i < pprofList.length; i++) {
 			pDataChart4.push({x: [], y: [], name: pprofList[i].toLowerCase()})
 		}
