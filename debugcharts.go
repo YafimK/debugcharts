@@ -3,7 +3,7 @@
 // To use debugcharts, link this package into your program:
 //	import _ "github.com/mkevac/debugcharts"
 //
-// If your application is not already running an http server, you
+// If your application is not already running an http DebugChartServer, you
 // need to start one.  Add "net/http" and "log" to your imports and
 // the following code to your main function:
 //
@@ -34,6 +34,11 @@ import (
 	"github.com/shirou/gopsutil/process"
 )
 
+const (
+	maxCount                  int = 86400
+	defaultDebugChartsPattern     = "/debug/charts/"
+)
+
 type update struct {
 	Ts             int64
 	BytesAllocated uint64
@@ -50,11 +55,6 @@ type update struct {
 type consumer struct {
 	id uint
 	c  chan update
-}
-
-type server struct {
-	consumers      []consumer
-	consumersMutex sync.RWMutex
 }
 
 type SimplePair struct {
@@ -84,26 +84,62 @@ type DataStorage struct {
 	Pprof          []PprofPair
 }
 
-const (
-	maxCount int = 86400
-)
+type DebugChartServer struct {
+	consumers      []consumer
+	mux            *http.ServeMux
+	pattern        string
+	server         http.Server
+	consumersMutex sync.RWMutex
+	log            Logger
+	errorChan      chan error
 
-var (
 	data           DataStorage
 	lastPause      uint32
 	mutex          sync.RWMutex
 	lastConsumerID uint
-	s              server
-	upgrader       = websocket.Upgrader{
+	upgrader       websocket.Upgrader
+	prevSysTime    float64
+	prevUserTime   float64
+	myProcess      *process.Process
+}
+
+var (
+	upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
-	prevSysTime  float64
-	prevUserTime float64
-	myProcess    *process.Process
 )
 
-func (s *server) gatherData() {
+func Bind(mux *http.ServeMux, log Logger) {
+	dcs := DebugChartServer{
+		mux:            mux,
+		pattern:        defaultDebugChartsPattern,
+		consumersMutex: sync.RWMutex{},
+		log:            log,
+		errorChan:      make(chan error),
+		data:           DataStorage{},
+		mutex:          sync.RWMutex{},
+		upgrader:       websocket.Upgrader{},
+		myProcess:      nil,
+	}
+	dcs.bind()
+}
+
+func (p *DebugChartServer) serve() error {
+	go func() {
+		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			p.log.Errorf("profiler server failed starting: %v", err)
+			p.errorChan <- err
+		}
+	}()
+	return nil
+}
+
+func (p *DebugChartServer) Shutdown() error {
+	return p.server.Close()
+}
+
+func (p *DebugChartServer) gatherData() {
 	timer := time.Tick(time.Second)
 
 	for {
@@ -122,7 +158,7 @@ func (s *server) gatherData() {
 				Mutex:        pprof.Lookup("mutex").Count(),
 				Threadcreate: pprof.Lookup("threadcreate").Count(),
 			}
-			data.Pprof = append(data.Pprof, PprofPair{
+			p.data.Pprof = append(p.data.Pprof, PprofPair{
 				uint64(nowUnix) * 1000,
 				u.Block,
 				u.Goroutine,
@@ -131,84 +167,86 @@ func (s *server) gatherData() {
 				u.Threadcreate,
 			})
 
-			cpuTimes, err := myProcess.Times()
+			cpuTimes, err := p.myProcess.Times()
 			if err != nil {
 				cpuTimes = &cpu.TimesStat{}
 			}
 
-			if prevUserTime != 0 {
-				u.CPUUser = cpuTimes.User - prevUserTime
-				u.CPUSys = cpuTimes.System - prevSysTime
-				data.CPUUsage = append(data.CPUUsage, CPUPair{uint64(nowUnix) * 1000, u.CPUUser, u.CPUSys})
+			if p.prevUserTime != 0 {
+				u.CPUUser = cpuTimes.User - p.prevUserTime
+				u.CPUSys = cpuTimes.System - p.prevSysTime
+				p.data.CPUUsage = append(p.data.CPUUsage, CPUPair{uint64(nowUnix) * 1000, u.CPUUser, u.CPUSys})
 			}
 
-			prevUserTime = cpuTimes.User
-			prevSysTime = cpuTimes.System
+			p.prevUserTime = cpuTimes.User
+			p.prevSysTime = cpuTimes.System
 
-			mutex.Lock()
+			p.mutex.Lock()
 
 			bytesAllocated := ms.Alloc
 			u.BytesAllocated = bytesAllocated
-			data.BytesAllocated = append(data.BytesAllocated, SimplePair{uint64(nowUnix) * 1000, bytesAllocated})
-			if lastPause == 0 || lastPause != ms.NumGC {
+			p.data.BytesAllocated = append(p.data.BytesAllocated, SimplePair{uint64(nowUnix) * 1000, bytesAllocated})
+			if p.lastPause == 0 || p.lastPause != ms.NumGC {
 				gcPause := ms.PauseNs[(ms.NumGC+255)%256]
 				u.GcPause = gcPause
-				data.GcPauses = append(data.GcPauses, SimplePair{uint64(nowUnix) * 1000, gcPause})
-				lastPause = ms.NumGC
+				p.data.GcPauses = append(p.data.GcPauses, SimplePair{uint64(nowUnix) * 1000, gcPause})
+				p.lastPause = ms.NumGC
 			}
 
-			if len(data.BytesAllocated) > maxCount {
-				data.BytesAllocated = data.BytesAllocated[len(data.BytesAllocated)-maxCount:]
+			if len(p.data.BytesAllocated) > maxCount {
+				p.data.BytesAllocated = p.data.BytesAllocated[len(p.data.BytesAllocated)-maxCount:]
 			}
 
-			if len(data.GcPauses) > maxCount {
-				data.GcPauses = data.GcPauses[len(data.GcPauses)-maxCount:]
+			if len(p.data.GcPauses) > maxCount {
+				p.data.GcPauses = p.data.GcPauses[len(p.data.GcPauses)-maxCount:]
 			}
 
-			mutex.Unlock()
+			p.mutex.Unlock()
 
-			s.sendToConsumers(u)
+			p.sendToConsumers(u)
 		}
 	}
 }
 
-func init() {
-	http.HandleFunc("/debug/charts/data-feed", s.dataFeedHandler)
-	http.HandleFunc("/debug/charts/data", dataHandler)
-	http.HandleFunc("/debug/charts/", handleAsset("static/index.html"))
-	http.HandleFunc("/debug/charts/main.js", handleAsset("static/main.js"))
-	http.HandleFunc("/debug/charts/jquery-2.1.4.min.js", handleAsset("static/jquery-2.1.4.min.js"))
-	http.HandleFunc("/debug/charts/moment.min.js", handleAsset("static/moment.min.js"))
+func (p *DebugChartServer) bind() {
+	p.mux.HandleFunc("/debug/charts/data-feed", p.dataFeedHandler)
+	p.mux.HandleFunc("/debug/charts/data", p.dataHandler)
 
-	myProcess, _ = process.NewProcess(int32(os.Getpid()))
+	p.mux.HandleFunc("/debug/charts/", handleAsset("static/index.html"))
 
-	// preallocate arrays in data, helps save on reallocations caused by append()
+	p.mux.HandleFunc("/debug/charts/main.js", handleAsset("static/main.js"))
+	p.mux.HandleFunc("/debug/charts/jquery-2.1.4.min.js", handleAsset("static/jquery-2.1.4.min.js"))
+	p.mux.HandleFunc("/debug/charts/moment.min.js", handleAsset("static/moment.min.js"))
+
+	p.myProcess, _ = process.NewProcess(int32(os.Getpid()))
+
+	// preallocate arrays in data, helps save on reallocation caused by append()
 	// when maxCount is large
-	data.BytesAllocated = make([]SimplePair, 0, maxCount)
-	data.GcPauses = make([]SimplePair, 0, maxCount)
-	data.CPUUsage = make([]CPUPair, 0, maxCount)
-	data.Pprof = make([]PprofPair, 0, maxCount)
+	p.data.BytesAllocated = make([]SimplePair, 0, maxCount)
+	p.data.GcPauses = make([]SimplePair, 0, maxCount)
+	p.data.CPUUsage = make([]CPUPair, 0, maxCount)
+	p.data.Pprof = make([]PprofPair, 0, maxCount)
 
-	go s.gatherData()
+	go p.gatherData()
 }
 
-func (s *server) sendToConsumers(u update) {
-	s.consumersMutex.RLock()
-	defer s.consumersMutex.RUnlock()
+func (p *DebugChartServer) sendToConsumers(u update) {
+	p.consumersMutex.RLock()
+	defer p.consumersMutex.RUnlock()
 
-	for _, c := range s.consumers {
+	for _, c := range p.consumers {
 		c.c <- u
 	}
 }
 
-func (s *server) removeConsumer(id uint) {
-	s.consumersMutex.Lock()
-	defer s.consumersMutex.Unlock()
+func (p *DebugChartServer) removeConsumer(id uint) {
+	p.consumersMutex.Lock()
+	defer p.consumersMutex.Unlock()
 
 	var consumerID uint
 	var consumerFound bool
 
-	for i, c := range s.consumers {
+	for i, c := range p.consumers {
 		if c.id == id {
 			consumerFound = true
 			consumerID = uint(i)
@@ -217,27 +255,27 @@ func (s *server) removeConsumer(id uint) {
 	}
 
 	if consumerFound {
-		s.consumers = append(s.consumers[:consumerID], s.consumers[consumerID+1:]...)
+		p.consumers = append(p.consumers[:consumerID], p.consumers[consumerID+1:]...)
 	}
 }
 
-func (s *server) addConsumer() consumer {
-	s.consumersMutex.Lock()
-	defer s.consumersMutex.Unlock()
+func (p *DebugChartServer) addConsumer() consumer {
+	p.consumersMutex.Lock()
+	defer p.consumersMutex.Unlock()
 
-	lastConsumerID++
+	p.lastConsumerID++
 
 	c := consumer{
-		id: lastConsumerID,
+		id: p.lastConsumerID,
 		c:  make(chan update),
 	}
 
-	s.consumers = append(s.consumers, c)
+	p.consumers = append(p.consumers, c)
 
 	return c
 }
 
-func (s *server) dataFeedHandler(w http.ResponseWriter, r *http.Request) {
+func (p *DebugChartServer) dataFeedHandler(w http.ResponseWriter, r *http.Request) {
 	var (
 		lastPing time.Time
 		lastPong time.Time
@@ -264,10 +302,10 @@ func (s *server) dataFeedHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}(conn)
 
-	c := s.addConsumer()
+	c := p.addConsumer()
 
 	defer func() {
-		s.removeConsumer(c.id)
+		p.removeConsumer(c.id)
 		conn.Close()
 	}()
 
@@ -290,9 +328,9 @@ func (s *server) dataFeedHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func dataHandler(w http.ResponseWriter, r *http.Request) {
-	mutex.RLock()
-	defer mutex.RUnlock()
+func (p *DebugChartServer) dataHandler(w http.ResponseWriter, r *http.Request) {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
 
 	if e := r.ParseForm(); e != nil {
 		log.Print("error parsing form")
@@ -306,7 +344,7 @@ func dataHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	encoder := json.NewEncoder(w)
-	encoder.Encode(data)
+	encoder.Encode(p.data)
 
 	fmt.Fprint(w, ")")
 }
@@ -330,4 +368,19 @@ func handleAsset(path string) func(http.ResponseWriter, *http.Request) {
 			return
 		}
 	}
+}
+
+type Logger interface {
+	Printf(format string, v ...interface{})
+	Print(v ...interface{})
+	Println(v ...interface{})
+	Fatal(v ...interface{})
+	Fatalf(format string, v ...interface{})
+	Fatalln(v ...interface{})
+	Error(v ...interface{})
+	Errorf(format string, v ...interface{})
+	Errorln(v ...interface{})
+	Panic(v ...interface{})
+	Panicf(format string, v ...interface{})
+	Panicln(v ...interface{})
 }
