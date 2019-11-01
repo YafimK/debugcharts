@@ -154,6 +154,7 @@ func (p *DebugChartServer) gatherData() {
 				Mutex:        pprof.Lookup("mutex").Count(),
 				Threadcreate: pprof.Lookup("threadcreate").Count(),
 			}
+			p.mutex.Lock()
 			p.data.Pprof = append(p.data.Pprof, PprofPair{
 				uint64(nowUnix) * 1000,
 				u.Block,
@@ -162,6 +163,7 @@ func (p *DebugChartServer) gatherData() {
 				u.Mutex,
 				u.Threadcreate,
 			})
+			p.mutex.Unlock()
 
 			cpuTimes, err := p.myProcess.Times()
 			if err != nil {
