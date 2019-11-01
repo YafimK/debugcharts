@@ -391,16 +391,12 @@ func (s SimpleLogger) Infoln(v ...interface{}) {
 	s.log.Println(v)
 }
 
-func (s SimpleLogger) Fatal(v ...interface{}) {
+func (s SimpleLogger) Critical(v ...interface{}) {
 	s.log.Fatal(v)
 }
 
-func (s SimpleLogger) Fatalf(format string, v ...interface{}) {
+func (s SimpleLogger) Criticalf(format string, v ...interface{}) {
 	s.log.Fatalf(format, v)
-}
-
-func (s SimpleLogger) Fatalln(v ...interface{}) {
-	s.log.Fatalln(v)
 }
 
 func (s SimpleLogger) Panic(v ...interface{}) {
@@ -419,9 +415,8 @@ type Logger interface {
 	Infof(format string, v ...interface{})
 	info(v ...interface{})
 	Infoln(v ...interface{})
-	Fatal(v ...interface{})
-	Fatalf(format string, v ...interface{})
-	Fatalln(v ...interface{})
+	Critical(v ...interface{})
+	Criticalf(format string, v ...interface{})
 	Panic(v ...interface{})
 	Panicf(format string, v ...interface{})
 	Panicln(v ...interface{})
