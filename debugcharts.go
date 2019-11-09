@@ -77,10 +77,10 @@ type PprofPair struct {
 }
 
 type DataStorage struct {
-	BytesAllocated []SimplePair
-	GcPauses       []SimplePair
-	CPUUsage       []CPUPair
-	Pprof          []PprofPair
+	HeapBytesAllocated []SimplePair
+	GcPauses           []SimplePair
+	CPUUsage           []CPUPair
+	Pprof              []PprofPair
 }
 
 type DebugChartServer struct {
@@ -100,17 +100,19 @@ type DebugChartServer struct {
 	prevSysTime    float64
 	prevUserTime   float64
 	myProcess      *process.Process
+
+	sampleInterval time.Duration
 }
 
-func NewDebugChartServer(pattern string, log Logger) *DebugChartServer {
-	dcs := NewDebugChartService(http.DefaultServeMux, pattern, log)
+func NewDebugChartServer(pattern string, log Logger, interval time.Duration) *DebugChartServer {
+	dcs := NewDebugChartService(http.DefaultServeMux, pattern, log, interval)
 	dcs.server = http.Server{Addr: "localhost:8080"}
 	return dcs
 }
 
 //NewDebugChartService binds to existent mux with the given pattern
-func NewDebugChartService(mux *http.ServeMux, pattern string, log Logger) *DebugChartServer {
-	return (&DebugChartServer{mux: mux, pattern: pattern, log: log}).bind()
+func NewDebugChartService(mux *http.ServeMux, pattern string, log Logger, interval time.Duration) *DebugChartServer {
+	return (&DebugChartServer{mux: mux, pattern: pattern, log: log, sampleInterval: interval}).bind()
 }
 
 var (
@@ -135,11 +137,10 @@ func (p *DebugChartServer) Shutdown() error {
 }
 
 func (p *DebugChartServer) gatherData() {
-	timer := time.Tick(time.Second)
-
+	ticker := time.NewTicker(time.Second)
 	for {
 		select {
-		case now := <-timer:
+		case now := <-ticker.C:
 			nowUnix := now.Unix()
 
 			var ms runtime.MemStats
@@ -182,7 +183,7 @@ func (p *DebugChartServer) gatherData() {
 
 			bytesAllocated := ms.Alloc
 			u.BytesAllocated = bytesAllocated
-			p.data.BytesAllocated = append(p.data.BytesAllocated, SimplePair{uint64(nowUnix) * 1000, bytesAllocated})
+			p.data.HeapBytesAllocated = append(p.data.HeapBytesAllocated, SimplePair{uint64(nowUnix) * 1000, bytesAllocated})
 			if p.lastPause == 0 || p.lastPause != ms.NumGC {
 				gcPause := ms.PauseNs[(ms.NumGC+255)%256]
 				u.GcPause = gcPause
@@ -190,8 +191,8 @@ func (p *DebugChartServer) gatherData() {
 				p.lastPause = ms.NumGC
 			}
 
-			if len(p.data.BytesAllocated) > maxCount {
-				p.data.BytesAllocated = p.data.BytesAllocated[len(p.data.BytesAllocated)-maxCount:]
+			if len(p.data.HeapBytesAllocated) > maxCount {
+				p.data.HeapBytesAllocated = p.data.HeapBytesAllocated[len(p.data.HeapBytesAllocated)-maxCount:]
 			}
 
 			if len(p.data.GcPauses) > maxCount {
@@ -229,7 +230,7 @@ func (p *DebugChartServer) bind() *DebugChartServer {
 
 	// preallocate arrays in data, helps save on reallocation caused by append()
 	// when maxCount is large
-	p.data.BytesAllocated = make([]SimplePair, 0, maxCount)
+	p.data.HeapBytesAllocated = make([]SimplePair, 0, maxCount)
 	p.data.GcPauses = make([]SimplePair, 0, maxCount)
 	p.data.CPUUsage = make([]CPUPair, 0, maxCount)
 	p.data.Pprof = make([]PprofPair, 0, maxCount)
