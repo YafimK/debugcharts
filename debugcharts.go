@@ -19,7 +19,6 @@ package debugcharts
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -215,14 +214,16 @@ func (p *DebugChartServer) getUri(suffix string) string {
 	return uri
 }
 func (p *DebugChartServer) bind() *DebugChartServer {
+
 	p.mux.HandleFunc(p.getUri("data-feed"), p.dataFeedHandler)
 	p.mux.HandleFunc(p.getUri("data"), p.dataHandler)
 
-	p.mux.HandleFunc(p.getUri(""), handleAsset("static/index.html"))
-
-	p.mux.HandleFunc(p.getUri("main.js"), handleAsset("static/main.js"))
-	p.mux.HandleFunc(p.getUri("jquery-2.1.4.min.js"), handleAsset("static/jquery-2.1.4.min.js"))
-	p.mux.HandleFunc(p.getUri("moment.min.js"), handleAsset("static/moment.min.js"))
+	fs := http.FileServer(http.Dir("static"))
+	p.mux.Handle("/", fs)
+	//p.mux.HandleFunc(p.getUri(""), handleAsset("static/index.html"))
+	//p.mux.HandleFunc(p.getUri("main.js"), handleAsset("static/main.js"))
+	//p.mux.HandleFunc(p.getUri("jquery-2.1.4.min.js"), handleAsset("static/jquery-2.1.4.min.js"))
+	//p.mux.HandleFunc(p.getUri("moment.min.js"), handleAsset("static/moment.min.js"))
 
 	p.myProcess, _ = process.NewProcess(int32(os.Getpid()))
 
@@ -344,16 +345,16 @@ func (p *DebugChartServer) dataHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	callback := r.FormValue("callback")
+	//callback := r.FormValue("callback")
 
-	fmt.Fprintf(w, "%v(", callback)
+	//fmt.Fprintf(w, "%v(", callback)
 
 	w.Header().Set("Content-Type", "application/json")
 
 	encoder := json.NewEncoder(w)
 	encoder.Encode(p.data)
 
-	fmt.Fprint(w, ")")
+	//fmt.Fprint(w, ")")
 }
 
 func handleAsset(path string) func(http.ResponseWriter, *http.Request) {

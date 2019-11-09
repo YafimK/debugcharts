@@ -38,8 +38,8 @@ func dummyAllocations() {
 }
 
 func main() {
-	go dummyAllocations()
-	go dummyCPUUsage()
+	//go dummyAllocations()
+	//go dummyCPUUsage()
 	mux := http.NewServeMux()
 	server := http.Server{
 		Addr:    "localhost:8080",
@@ -51,6 +51,6 @@ func main() {
 			log.Printf("profiler server failed starting: %v", err)
 		}
 	}()
-	log.Printf("you can now open http://localhost:8080/debug/charts/ in your browser")
+	log.Printf("you can now open http://localhost:8080/ in your browser")
 	select {}
 }
